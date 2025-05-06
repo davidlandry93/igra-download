@@ -1,0 +1,16 @@
+
+channels:
+- conda-forge
+dependencies:
+- black=25.1
+- fire=0.7
+- netcdf4=1.7
+- numpy=2.2
+- omegaconf=2.3
+- pandas=2.2
+- pip=25.1
+- platformdirs=4.3
+- pytest=8.3
+- python=3.12
+- requests=2.32
+- xarray=2025.3.1

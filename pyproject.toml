@@ -1,0 +1,22 @@
+[project]
+name = "igradownload"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fire>=0.7.0",
+    "omegaconf>=2.3.0",
+    "pandas>=2.2.3",
+    "xarray>=2025.3.1",
+]
+
+[project.scripts]
+igra = "igradownload.cli:cli"
+
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "pytest>=8.3.5",
+]
+
