@@ -1,45 +1,47 @@
-import shutil
-from typing import Iterable
+import pathlib
 import zipfile
 
 import numpy as np
 import pandas as pd
 import requests
-import tempfile
-import pathlib
+
 import tqdm
-from aq2 import task, workflow, as_path
+from aq3 import task, workflow, iotask, get_path
 
 
 ROOT_URL = "https://www.ncei.noaa.gov/data/integrated-global-radiosonde-archive"
 DEFAULT_DESTINATION = "test"
 
 
-@workflow
+@workflow()
 def download_station_list() -> str:
     return download_igra_file(
         f"doc/igra2-station-list.txt"
     )
 
 
-@task(
-    path="raw/{0}",
-    serializer="bytes",
-    cache=True,
-)
+@iotask(path="raw/{0}")
 def download_igra_file(resource_name: str) -> bytes:
     full_url = f"{ROOT_URL}/{resource_name}"
 
-    try:
-        response = requests.get(full_url, stream=False)
-        response.raise_for_status()
+    output_path = pathlib.Path(get_path())
+    tmp_file_path = pathlib.Path(output_path).with_suffix(
+        output_path.suffix + ".tmp"
+    )
 
-        return response.content
-    except requests.exceptions.RequestException as e:
-        raise e
+    response = requests.get(full_url, stream=True)
+    response.raise_for_status()
+
+    tmp_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(tmp_file_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    tmp_file_path.rename(output_path)
 
 
-@workflow
+@workflow()
 def download_docs():
     docs_files = [
         'igra2-country-list.txt',
@@ -86,7 +88,7 @@ def station_list_to_dataframe(station_list_path: str) -> pd.DataFrame:
     return df
 
 
-@workflow
+@workflow()
 def station_list():
     station_list_path = as_path(download_station_list())
 
@@ -95,12 +97,12 @@ def station_list():
     return df
 
 
-@workflow
+@workflow()
 def download_one_station_data_raw(id: str):
     return download_igra_file("access/data-por/{0}-data.txt.zip".format(id))
 
 
-@task
+@task()
 def parse_station_datafile(station_data_path: str) -> tuple[pd.DataFrame, ...]:
     sounding_data = []
     sounding_level_data = []
@@ -277,7 +279,7 @@ def parse_station_datafile(station_data_path: str) -> tuple[pd.DataFrame, ...]:
     return sounding_df, all_levels_df
 
 
-@task
+@task()
 def join_station_data(station_data: tuple[pd.DataFrame, ...]) -> pd.DataFrame:
     sounding_df, sounding_level_df = station_data
 
@@ -297,7 +299,7 @@ def join_station_data(station_data: tuple[pd.DataFrame, ...]) -> pd.DataFrame:
     return merged_df
 
 
-@workflow
+@workflow()
 def acquire_process_one_station(
     station_id: str,
 ) -> pd.DataFrame:
@@ -308,7 +310,7 @@ def acquire_process_one_station(
     return station_data_joined
 
 
-@workflow
+@workflow()
 def download_igra(destination: str):
     return [
         download_docs(destination),

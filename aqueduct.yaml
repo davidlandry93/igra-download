@@ -1,0 +1,5 @@
+store:
+  default: ${oc.env:WORK, ${oc.env:HOME}}/igra/
+
+search_path:
+  - igradownload/download.py
