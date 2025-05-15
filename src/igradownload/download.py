@@ -108,7 +108,7 @@ def download_one_station_data_raw(id: str):
 
 
 @iotask(backend='process', path="station_data/{0}.parquet")
-def parse_station_datafile(station_name: str, station_data_path: str) -> tuple[pd.DataFrame, ...]:
+def parse_station_datafile(station_name: str, station_data_path: str):
     sounding_data = []
     sounding_level_data = []
 
@@ -316,10 +316,7 @@ def download_igra():
     station_download_bindings = []
     for stn_id in stns_df['id']:
         station_download_bindings.append(
-            download_one_station_data_raw(stn_id)
+            parse_station_datafile(stn_id, download_one_station_data_raw(stn_id))
         )
 
-    breakpoint()
-    stn_files = yield station_download_bindings
-
-    breakpoint()
+    yield station_download_bindings
