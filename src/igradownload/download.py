@@ -1,5 +1,5 @@
 import pathlib
-from typing import Any, Generator
+import logging
 import zipfile
 
 import numpy as np
@@ -9,6 +9,7 @@ import requests
 import tqdm
 from aq3 import task, workflow, iotask, get_path
 
+_logger = logging.getLogger(__name__)
 
 ROOT_URL = "https://www.ncei.noaa.gov/data/integrated-global-radiosonde-archive"
 DEFAULT_DESTINATION = "test"
@@ -37,7 +38,7 @@ def download_igra_file(resource_name: str) -> None:
 
 def download_station_list():
     return download_igra_file(
-        f"doc/igra2-station-list.txt"
+        "doc/igra2-station-list.txt"
     )
 
 
@@ -106,8 +107,8 @@ def download_one_station_data_raw(id: str):
     return download_igra_file("access/data-por/{0}-data.txt.zip".format(id))
 
 
-@task()
-def parse_station_datafile(station_data_path: str) -> tuple[pd.DataFrame, ...]:
+@iotask(backend='process', path="station_data/{0}.parquet")
+def parse_station_datafile(station_name: str, station_data_path: str) -> tuple[pd.DataFrame, ...]:
     sounding_data = []
     sounding_level_data = []
 
@@ -280,27 +281,19 @@ def parse_station_datafile(station_data_path: str) -> tuple[pd.DataFrame, ...]:
             (all_levels_df[column] == -9999) | (all_levels_df[column] == -8888), np.nan, all_levels_df[column])
         all_levels_df[column] = all_levels_df[column] / ratio
 
-    return sounding_df, all_levels_df
-
-
-@task()
-def join_station_data(station_data: tuple[pd.DataFrame, ...]) -> pd.DataFrame:
-    sounding_df, sounding_level_df = station_data
-
     sounding_df.drop(columns=["n_levels"], inplace=True)
+    merged_df = pd.merge(all_levels_df, sounding_df, left_on="sounding_index", right_index=True)
 
-    # Merge the two DataFrames on the index
-    merged_df = pd.merge(
-        sounding_level_df,
-        sounding_df,
-        left_on="sounding_index",
-        right_index=True,
+    output_path = pathlib.Path(get_path())
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = pathlib.Path(output_path).with_suffix(
+        output_path.suffix + ".tmp"
     )
+    merged_df.to_parquet(tmp_path, index=False)
+    tmp_path.rename(output_path)
 
-    # Drop the 'sounding_index' column
-    # merged_df.drop(columns=["sounding_index"], inplace=True)
 
-    return merged_df
 
 
 @workflow()
@@ -308,14 +301,13 @@ def acquire_process_one_station(
     station_id: str,
 ):
     station_data_path = download_one_station_data_raw(station_id)
-    station_data = parse_station_datafile(station_data_path)
-    station_data_joined = join_station_data(station_data)
+    station_data = parse_station_datafile(station_id, station_data_path)
 
-    return station_data_joined
+    return station_data
 
 
 @workflow()
-def download_igra() -> Generator[Binding, Any, None]:
+def download_igra():
     list_binding = station_list()
     stns_path = yield list_binding
 
@@ -324,8 +316,10 @@ def download_igra() -> Generator[Binding, Any, None]:
     station_download_bindings = []
     for stn_id in stns_df['id']:
         station_download_bindings.append(
-            acquire_process_one_station(stn_id)
+            download_one_station_data_raw(stn_id)
         )
+
+    breakpoint()
     stn_files = yield station_download_bindings
 
     breakpoint()
