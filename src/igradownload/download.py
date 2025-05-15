@@ -1,4 +1,5 @@
 import pathlib
+from typing import Any, Generator
 import zipfile
 
 import numpy as np
@@ -13,15 +14,8 @@ ROOT_URL = "https://www.ncei.noaa.gov/data/integrated-global-radiosonde-archive"
 DEFAULT_DESTINATION = "test"
 
 
-@workflow()
-def download_station_list() -> str:
-    return download_igra_file(
-        f"doc/igra2-station-list.txt"
-    )
-
-
-@iotask(path="raw/{0}")
-def download_igra_file(resource_name: str) -> bytes:
+@iotask(path="raw/{0}", backend='thread', key="raw/{0}")
+def download_igra_file(resource_name: str) -> None:
     full_url = f"{ROOT_URL}/{resource_name}"
 
     output_path = pathlib.Path(get_path())
@@ -39,6 +33,12 @@ def download_igra_file(resource_name: str) -> bytes:
             f.write(chunk)
 
     tmp_file_path.rename(output_path)
+
+
+def download_station_list():
+    return download_igra_file(
+        f"doc/igra2-station-list.txt"
+    )
 
 
 @workflow()
@@ -69,8 +69,8 @@ def download_docs():
     return tasks
 
 
-@task(cache=True, serializer="pandas", path="station_list.parquet")
-def station_list_to_dataframe(station_list_path: str) -> pd.DataFrame:
+@iotask(path="station_list.parquet")
+def station_list_to_dataframe(station_list_path: str) -> None:
     df = pd.read_fwf(station_list_path, colspec='infer', infer_nrows=2000, header=None, names=[
         'id', 'latitude', 'longitude', 'elevation', 'state', 'name', 'first_year', 'last_year', 'n_obs'
     ])
@@ -85,12 +85,16 @@ def station_list_to_dataframe(station_list_path: str) -> pd.DataFrame:
     df['state'] = df['state'].astype('string')
     df['name'] = df['name'].astype('string')
 
-    return df
+    output_path = get_path()
+
+    print(output_path)
+
+    df.to_parquet(output_path, index=False)
 
 
 @workflow()
 def station_list():
-    station_list_path = as_path(download_station_list())
+    station_list_path = download_station_list()
 
     df = station_list_to_dataframe(station_list_path)
 
@@ -302,8 +306,8 @@ def join_station_data(station_data: tuple[pd.DataFrame, ...]) -> pd.DataFrame:
 @workflow()
 def acquire_process_one_station(
     station_id: str,
-) -> pd.DataFrame:
-    station_data_path = as_path(download_one_station_data_raw(station_id))
+):
+    station_data_path = download_one_station_data_raw(station_id)
     station_data = parse_station_datafile(station_data_path)
     station_data_joined = join_station_data(station_data)
 
@@ -311,7 +315,17 @@ def acquire_process_one_station(
 
 
 @workflow()
-def download_igra(destination: str):
-    return [
-        download_docs(destination),
-    ]
+def download_igra() -> Generator[Binding, Any, None]:
+    list_binding = station_list()
+    stns_path = yield list_binding
+
+    stns_df = pd.read_parquet(stns_path)
+
+    station_download_bindings = []
+    for stn_id in stns_df['id']:
+        station_download_bindings.append(
+            acquire_process_one_station(stn_id)
+        )
+    stn_files = yield station_download_bindings
+
+    breakpoint()
